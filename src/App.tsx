@@ -31,6 +31,34 @@ export default function App() {
   const turn = chess.turn();
   const history = chess.history({ verbose: true });
 
+  const pieceValues: Record<string, number> = {
+    p: 1,
+    n: 3,
+    b: 3,
+    r: 5,
+    q: 9,
+  };
+
+  const whiteCaptured = history.filter(
+    (move) => move.color === "w" && move.captured,
+  );
+
+  const blackCaptured = history.filter(
+    (move) => move.color === "b" && move.captured,
+  );
+
+  const whiteMaterial = whiteCaptured.reduce(
+    (total, move) => total + pieceValues[move.captured!],
+    0,
+  );
+
+  const blackMaterial = blackCaptured.reduce(
+    (total, move) => total + pieceValues[move.captured!],
+    0,
+  );
+
+  const materialDifference = whiteMaterial - blackMaterial;
+
   const capturedByWhite = history
     .filter((move) => move.color === "w" && move.captured)
     .map((move) => move.captured!);
@@ -38,27 +66,6 @@ export default function App() {
   const capturedByBlack = history
     .filter((move) => move.color === "b" && move.captured)
     .map((move) => move.captured!);
-
-  const pieceValues: Record<string, number> = {
-    q: 9,
-    r: 5,
-    b: 3,
-    n: 3,
-    p: 1,
-  };
-
-  const whiteMaterial = capturedByWhite.reduce(
-    (total, piece) => total + pieceValues[piece],
-    0,
-  );
-
-  const blackMaterial = capturedByBlack.reduce(
-    (total, piece) => total + pieceValues[piece],
-    0,
-  );
-
-  // const materialBalance = whiteMaterial - blackMaterial;
-
   const capturedSymbols = (pieces: string[], capturedColor: "w" | "b") =>
     pieces.map((piece, index) => (
       <span key={`${piece}-${index}`} className="captured-piece">
@@ -190,10 +197,16 @@ export default function App() {
             <div
               className="captured-pieces"
               aria-label="Pieces captured by Black">
-              {capturedSymbols(capturedByBlack, "w")}
-              {blackMaterial > whiteMaterial && (
+              {blackCaptured.map((move, index) => (
+                <span
+                  className="captured-piece"
+                  key={`${move.from}-${move.to}-${index}`}>
+                  {symbols.w[move.captured!]}
+                </span>
+              ))}
+              {materialDifference < 0 && (
                 <span className="material-advantage">
-                  +{blackMaterial - whiteMaterial}
+                  +{Math.abs(materialDifference)}
                 </span>
               )}
             </div>
@@ -268,13 +281,29 @@ export default function App() {
             <div
               className="captured-pieces"
               aria-label="Pieces captured by White">
+              {whiteCaptured.map((move, index) => (
+                <span
+                  className="captured-piece"
+                  key={`${move.from}-${move.to}-${index}`}>
+                  {symbols.b[move.captured!]}
+                </span>
+              ))}
+              {materialDifference > 0 && (
+                <span className="material-advantage">
+                  +{materialDifference}
+                </span>
+              )}
+            </div>
+            {/* <div
+              className="captured-pieces"
+              aria-label="Pieces captured by White">
               {capturedSymbols(capturedByWhite, "b")}
               {whiteMaterial > blackMaterial && (
                 <span className="material-advantage">
                   +{whiteMaterial - blackMaterial}
                 </span>
               )}
-            </div>
+            </div> */}
           </div>
         </div>
 
