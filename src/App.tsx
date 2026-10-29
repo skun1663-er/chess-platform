@@ -30,6 +30,42 @@ export default function App() {
   const board = chess.board();
   const turn = chess.turn();
   const history = chess.history({ verbose: true });
+
+  const capturedByWhite = history
+    .filter((move) => move.color === "w" && move.captured)
+    .map((move) => move.captured!);
+
+  const capturedByBlack = history
+    .filter((move) => move.color === "b" && move.captured)
+    .map((move) => move.captured!);
+
+  const pieceValues: Record<string, number> = {
+    q: 9,
+    r: 5,
+    b: 3,
+    n: 3,
+    p: 1,
+  };
+
+  const whiteMaterial = capturedByWhite.reduce(
+    (total, piece) => total + pieceValues[piece],
+    0,
+  );
+
+  const blackMaterial = capturedByBlack.reduce(
+    (total, piece) => total + pieceValues[piece],
+    0,
+  );
+
+  // const materialBalance = whiteMaterial - blackMaterial;
+
+  const capturedSymbols = (pieces: string[], capturedColor: "w" | "b") =>
+    pieces.map((piece, index) => (
+      <span key={`${piece}-${index}`} className="captured-piece">
+        {symbols[capturedColor][piece]}
+      </span>
+    ));
+
   const gameOver = chess.isGameOver();
 
   const legalMoves = selected
@@ -135,7 +171,6 @@ export default function App() {
     <main className="chess-app">
       <header className="topbar">
         <a className="brand" href="#">
-          <span className="brand-icon">♞</span>
           Chess<span className="brand-light">Platform</span>
         </a>
         <span className="online-status">
@@ -152,6 +187,16 @@ export default function App() {
               <span>{turn === "b" ? "Your turn" : "Waiting for White"}</span>
             </div>
             <span className="player-rating">1200</span>
+            <div
+              className="captured-pieces"
+              aria-label="Pieces captured by Black">
+              {capturedSymbols(capturedByBlack, "w")}
+              {blackMaterial > whiteMaterial && (
+                <span className="material-advantage">
+                  +{blackMaterial - whiteMaterial}
+                </span>
+              )}
+            </div>
           </div>
 
           <div className="chessboard">
@@ -162,6 +207,10 @@ export default function App() {
                 const isSelected = selected === square;
                 const isTarget = targets.includes(square);
                 const isLastMove = lastMove?.includes(square) ?? false;
+                const isKingInCheck =
+                  piece?.type === "k" &&
+                  piece.color === turn &&
+                  chess.isCheck();
 
                 return (
                   <button
@@ -171,7 +220,15 @@ export default function App() {
                       isLight ? "light-square" : "dark-square",
                       isSelected ? "selected-square" : "",
                       isLastMove ? "last-move-square" : "",
-                    ].join(" ")}
+                      isTarget
+                        ? piece
+                          ? "capture-target"
+                          : "legal-target"
+                        : "",
+                      isKingInCheck ? "check-square" : "",
+                    ]
+                      .filter(Boolean)
+                      .join(" ")}
                     onClick={() => handleSquareClick(square)}
                     aria-label={`${squareName(square)}${piece ? ` ${piece.color === "w" ? "White" : "Black"} ${piece.type}` : ""}`}>
                     {colIndex === 0 && (
@@ -208,6 +265,16 @@ export default function App() {
               <span>{turn === "w" ? "Your turn" : "Waiting for Black"}</span>
             </div>
             <span className="player-rating">1200</span>
+            <div
+              className="captured-pieces"
+              aria-label="Pieces captured by White">
+              {capturedSymbols(capturedByWhite, "b")}
+              {whiteMaterial > blackMaterial && (
+                <span className="material-advantage">
+                  +{whiteMaterial - blackMaterial}
+                </span>
+              )}
+            </div>
           </div>
         </div>
 
@@ -263,12 +330,31 @@ export default function App() {
                 (_, index) => (
                   <div className="move-row" key={index}>
                     <span>{index + 1}.</span>
-                    <strong>
+                    {/* <strong>
                       {history[index * 2]?.san ?? ""}
                       {history[index * 2 + 1]
                         ? `   ${history[index * 2 + 1].san}`
                         : ""}
-                    </strong>
+                    </strong> */}
+                    <span className="move-number">{index + 1}.</span>
+
+                    <span
+                      className={[
+                        "move-cell",
+                        index * 2 === history.length - 1 ? "latest-move" : "",
+                      ].join(" ")}>
+                      {history[index * 2]?.san ?? ""}
+                    </span>
+
+                    <span
+                      className={[
+                        "move-cell",
+                        index * 2 + 1 === history.length - 1
+                          ? "latest-move"
+                          : "",
+                      ].join(" ")}>
+                      {history[index * 2 + 1]?.san ?? ""}
+                    </span>
                   </div>
                 ),
               )
@@ -294,7 +380,7 @@ export default function App() {
       </section>
 
       <footer className="app-footer">
-        <span>♞ ChessPlatform</span>
+        <span>ChessPlatform</span>
         <span>Made for the love of chess.</span>
       </footer>
     </main>
