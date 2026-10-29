@@ -327,36 +327,38 @@ export default function App() {
             ) : (
               Array.from(
                 { length: Math.ceil(history.length / 2) },
-                (_, index) => (
-                  <div className="move-row" key={index}>
-                    <span>{index + 1}.</span>
-                    {/* <strong>
-                      {history[index * 2]?.san ?? ""}
-                      {history[index * 2 + 1]
-                        ? `   ${history[index * 2 + 1].san}`
-                        : ""}
-                    </strong> */}
-                    <span className="move-number">{index + 1}.</span>
+                (_, index) => {
+                  const whiteMove = history[index * 2];
+                  const blackMove = history[index * 2 + 1];
 
-                    <span
-                      className={[
-                        "move-cell",
-                        index * 2 === history.length - 1 ? "latest-move" : "",
-                      ].join(" ")}>
-                      {history[index * 2]?.san ?? ""}
-                    </span>
+                  return (
+                    <div className="move-row" key={index}>
+                      <span className="move-number">{index + 1}.</span>
 
-                    <span
-                      className={[
-                        "move-cell",
-                        index * 2 + 1 === history.length - 1
-                          ? "latest-move"
-                          : "",
-                      ].join(" ")}>
-                      {history[index * 2 + 1]?.san ?? ""}
-                    </span>
-                  </div>
-                ),
+                      <span
+                        className={[
+                          "move-cell",
+                          index * 2 === history.length - 1 ? "latest-move" : "",
+                        ]
+                          .filter(Boolean)
+                          .join(" ")}>
+                        {whiteMove?.san ?? "—"}
+                      </span>
+
+                      <span
+                        className={[
+                          "move-cell",
+                          index * 2 + 1 === history.length - 1
+                            ? "latest-move"
+                            : "",
+                        ]
+                          .filter(Boolean)
+                          .join(" ")}>
+                        {blackMove?.san ?? ""}
+                      </span>
+                    </div>
+                  );
+                },
               )
             )}
           </div>
