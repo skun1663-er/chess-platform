@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { Chess, type Square } from "chess.js";
 import "./App.css";
 
@@ -9,16 +9,17 @@ const symbols: Record<"w" | "b", Record<string, string>> = {
   b: { k: "♚", q: "♛", r: "♜", b: "♝", n: "♞", p: "♟" },
 };
 
-function squareName(square: Square) {
-  return square;
-}
+// function squareName(square: Square) {
+//   return square;
+// }
 
 export default function App() {
-  // Keep one Chess instance so its full move history remains available for undo.
+  // The live Chess instance owns the actual game and its full move history.
   const game = useRef(new Chess());
-  const [, setRevision] = useState(0);
+  const [revision, setRevision] = useState(0);
+  const [viewPly, setViewPly] = useState<number | null>(null);
   const [selected, setSelected] = useState<Square | null>(null);
-  const [lastMove, setLastMove] = useState<[Square, Square] | null>(null);
+  // const [lastMove, setLastMove] = useState<[Square, Square] | null>(null);
   const [promotion, setPromotion] = useState<{
     from: Square;
     to: Square;
@@ -27,9 +28,31 @@ export default function App() {
   const [notice, setNotice] = useState("");
 
   const chess = game.current;
-  const board = chess.board();
-  const turn = chess.turn();
-  const history = chess.history({ verbose: true });
+  const liveHistory = chess.history({ verbose: true });
+
+  // Rebuild historical positions separately so browsing never mutates the live game.
+  const displayChess = useMemo(() => {
+    const replay = new Chess();
+    const movesToShow = viewPly ?? liveHistory.length;
+
+    for (const move of liveHistory.slice(0, movesToShow)) {
+      replay.move({
+        from: move.from,
+        to: move.to,
+        ...(move.promotion ? { promotion: move.promotion } : {}),
+      });
+    }
+
+    return replay;
+  }, [revision, viewPly]);
+
+  const board = displayChess.board();
+  const turn = displayChess.turn();
+  const history = liveHistory;
+  const displayedHistory = displayChess.history({ verbose: true });
+  const displayedLastMove = displayedHistory[displayedHistory.length - 1];
+  const currentPly = viewPly ?? liveHistory.length;
+  const isViewingHistory = viewPly !== null;
 
   const pieceValues: Record<string, number> = {
     p: 1,
@@ -39,11 +62,11 @@ export default function App() {
     q: 9,
   };
 
-  const whiteCaptured = history.filter(
+  // Captures and material are calculated for the position currently displayed.
+  const whiteCaptured = displayedHistory.filter(
     (move) => move.color === "w" && move.captured,
   );
-
-  const blackCaptured = history.filter(
+  const blackCaptured = displayedHistory.filter(
     (move) => move.color === "b" && move.captured,
   );
 
@@ -51,38 +74,28 @@ export default function App() {
     (total, move) => total + pieceValues[move.captured!],
     0,
   );
-
   const blackMaterial = blackCaptured.reduce(
     (total, move) => total + pieceValues[move.captured!],
     0,
   );
-
   const materialDifference = whiteMaterial - blackMaterial;
 
-  const capturedByWhite = history
-    .filter((move) => move.color === "w" && move.captured)
-    .map((move) => move.captured!);
-
-  const capturedByBlack = history
-    .filter((move) => move.color === "b" && move.captured)
-    .map((move) => move.captured!);
-  const capturedSymbols = (pieces: string[], capturedColor: "w" | "b") =>
-    pieces.map((piece, index) => (
-      <span key={`${piece}-${index}`} className="captured-piece">
-        {symbols[capturedColor][piece]}
-      </span>
-    ));
-
   const gameOver = chess.isGameOver();
-
   const legalMoves = selected
     ? chess.moves({ square: selected, verbose: true })
     : [];
-
   const targets = legalMoves.map((move) => move.to);
 
   function refresh() {
     setRevision((revision) => revision + 1);
+  }
+
+  function showPly(ply: number) {
+    const boundedPly = Math.max(0, Math.min(ply, liveHistory.length));
+    setViewPly(boundedPly === liveHistory.length ? null : boundedPly);
+    setSelected(null);
+    setPromotion(null);
+    setNotice("");
   }
 
   function playMove(
@@ -90,14 +103,17 @@ export default function App() {
     to: Square,
     promotionPiece?: "q" | "r" | "b" | "n",
   ) {
+    // A historical position is read-only; return to Latest before playing.
+    if (viewPly !== null) return;
+
     try {
-      const move = chess.move({
+      chess.move({
         from,
         to,
         ...(promotionPiece ? { promotion: promotionPiece } : {}),
       });
 
-      setLastMove([move.from, move.to]);
+      // setLastMove([move.from, move.to]);
       setSelected(null);
       setPromotion(null);
       setNotice("");
@@ -108,7 +124,7 @@ export default function App() {
   }
 
   function handleSquareClick(square: Square) {
-    if (gameOver || promotion) return;
+    if (gameOver || promotion || viewPly !== null) return;
 
     const piece = chess.get(square);
 
@@ -117,11 +133,7 @@ export default function App() {
 
       if (move) {
         if (move.flags.includes("p")) {
-          setPromotion({
-            from: selected,
-            to: square,
-            color: turn,
-          });
+          setPromotion({ from: selected, to: square, color: chess.turn() });
           return;
         }
 
@@ -130,7 +142,7 @@ export default function App() {
       }
     }
 
-    if (piece?.color === turn) {
+    if (piece?.color === chess.turn()) {
       setSelected(square);
       setNotice("");
     } else {
@@ -142,36 +154,40 @@ export default function App() {
   function undo() {
     if (!chess.undo()) return;
 
-    // const previous = chess.history({ verbose: true }).at(-1);
-    const previousMoves = chess.history({ verbose: true });
-    const previous = previousMoves[previousMoves.length - 1];
-    setLastMove(previous ? [previous.from, previous.to] : null);
+    // const previousMoves = chess.history({ verbose: true });
+    // const previous = previousMoves[previousMoves.length - 1];
+    // setLastMove(previous ? [previous.from, previous.to] : null);
     setSelected(null);
     setPromotion(null);
     setNotice("");
+    setViewPly(null);
     refresh();
   }
 
   function restart() {
     chess.reset();
     setSelected(null);
-    setLastMove(null);
+    // setLastMove(null);
     setPromotion(null);
     setNotice("");
+    setViewPly(null);
     refresh();
   }
 
   function getStatus() {
-    if (chess.isCheckmate()) {
-      return `Checkmate — ${turn === "w" ? "Black" : "White"} wins.`;
+    if (displayChess.isCheckmate()) {
+      return `Checkmate — ${displayChess.turn() === "w" ? "Black" : "White"} wins.`;
     }
-    if (chess.isStalemate()) return "Draw — stalemate.";
-    if (chess.isThreefoldRepetition()) return "Draw — threefold repetition.";
-    if (chess.isInsufficientMaterial()) return "Draw — insufficient material.";
-    if (chess.isDraw()) return "Draw — draw condition reached.";
-    if (chess.isCheck())
-      return `${turn === "w" ? "White" : "Black"} to move — Check!`;
-    return `${turn === "w" ? "White" : "Black"} to move`;
+    if (displayChess.isStalemate()) return "Draw — stalemate.";
+    if (displayChess.isThreefoldRepetition())
+      return "Draw — threefold repetition.";
+    if (displayChess.isInsufficientMaterial())
+      return "Draw — insufficient material.";
+    if (displayChess.isDraw()) return "Draw — draw condition reached.";
+    if (displayChess.isCheck()) {
+      return `${displayChess.turn() === "w" ? "White" : "Black"} to move — Check!`;
+    }
+    return `${displayChess.turn() === "w" ? "White" : "Black"} to move`;
   }
 
   return (
@@ -191,7 +207,9 @@ export default function App() {
             <div className="player-avatar">♟</div>
             <div>
               <strong>Black Player</strong>
-              <span>{turn === "b" ? "Your turn" : "Waiting for White"}</span>
+              <span>
+                {turn === "b" ? "Black to move" : "Waiting for Black"}
+              </span>
             </div>
             <span className="player-rating">1200</span>
             <div
@@ -217,17 +235,21 @@ export default function App() {
               row.map((piece, colIndex) => {
                 const square = `${files[colIndex]}${8 - rowIndex}` as Square;
                 const isLight = (rowIndex + colIndex) % 2 === 0;
-                const isSelected = selected === square;
-                const isTarget = targets.includes(square);
-                const isLastMove = lastMove?.includes(square) ?? false;
+                const isSelected = !isViewingHistory && selected === square;
+                const isTarget = !isViewingHistory && targets.includes(square);
+                const isLastMove = displayedLastMove
+                  ? displayedLastMove.from === square ||
+                    displayedLastMove.to === square
+                  : false;
                 const isKingInCheck =
                   piece?.type === "k" &&
                   piece.color === turn &&
-                  chess.isCheck();
+                  displayChess.isCheck();
 
                 return (
                   <button
                     key={square}
+                    type="button"
                     className={[
                       "square",
                       isLight ? "light-square" : "dark-square",
@@ -243,7 +265,7 @@ export default function App() {
                       .filter(Boolean)
                       .join(" ")}
                     onClick={() => handleSquareClick(square)}
-                    aria-label={`${squareName(square)}${piece ? ` ${piece.color === "w" ? "White" : "Black"} ${piece.type}` : ""}`}>
+                    aria-label={`${square}${piece ? ` ${piece.color === "w" ? "White" : "Black"} ${piece.type}` : ""}`}>
                     {colIndex === 0 && (
                       <span className="rank-label">{8 - rowIndex}</span>
                     )}
@@ -252,9 +274,7 @@ export default function App() {
                     )}
                     {piece && (
                       <span
-                        className={`chess-piece ${
-                          piece.color === "w" ? "white-piece" : "black-piece"
-                        }`}>
+                        className={`chess-piece ${piece.color === "w" ? "white-piece" : "black-piece"}`}>
                         {symbols[piece.color][piece.type]}
                       </span>
                     )}
@@ -275,7 +295,9 @@ export default function App() {
             <div className="player-avatar">♙</div>
             <div>
               <strong>White Player (You)</strong>
-              <span>{turn === "w" ? "Your turn" : "Waiting for Black"}</span>
+              <span>
+                {turn === "w" ? "White to move" : "Waiting for White"}
+              </span>
             </div>
             <span className="player-rating">1200</span>
             <div
@@ -294,16 +316,6 @@ export default function App() {
                 </span>
               )}
             </div>
-            {/* <div
-              className="captured-pieces"
-              aria-label="Pieces captured by White">
-              {capturedSymbols(capturedByWhite, "b")}
-              {whiteMaterial > blackMaterial && (
-                <span className="material-advantage">
-                  +{whiteMaterial - blackMaterial}
-                </span>
-              )}
-            </div> */}
           </div>
         </div>
 
@@ -319,18 +331,21 @@ export default function App() {
           <div className="turn-card">
             <span className="turn-icon">♟</span>
             <div>
-              <span className="eyebrow">GAME STATUS</span>
+              <span className="eyebrow">
+                {isViewingHistory ? "HISTORICAL POSITION" : "GAME STATUS"}
+              </span>
               <strong>{getStatus()}</strong>
             </div>
           </div>
 
-          {promotion && (
+          {promotion && viewPly === null && (
             <div className="promotion-panel">
               <strong>Choose your promotion</strong>
               <div className="promotion-options">
                 {(["q", "r", "b", "n"] as const).map((type) => (
                   <button
                     key={type}
+                    type="button"
                     className="promotion-button"
                     onClick={() => playMove(promotion.from, promotion.to, type)}
                     aria-label={`Promote to ${type}`}>
@@ -359,32 +374,39 @@ export default function App() {
                 (_, index) => {
                   const whiteMove = history[index * 2];
                   const blackMove = history[index * 2 + 1];
+                  const whitePly = index * 2 + 1;
+                  const blackPly = index * 2 + 2;
 
                   return (
                     <div className="move-row" key={index}>
                       <span className="move-number">{index + 1}.</span>
-
-                      <span
+                      <button
+                        type="button"
                         className={[
                           "move-cell",
-                          index * 2 === history.length - 1 ? "latest-move" : "",
+                          whitePly === currentPly ? "latest-move" : "",
                         ]
                           .filter(Boolean)
-                          .join(" ")}>
+                          .join(" ")}
+                        onClick={() => showPly(whitePly)}
+                        aria-label={`View move ${index + 1}, White: ${whiteMove?.san ?? "none"}`}>
                         {whiteMove?.san ?? "—"}
-                      </span>
-
-                      <span
+                      </button>
+                      <button
+                        type="button"
                         className={[
                           "move-cell",
-                          index * 2 + 1 === history.length - 1
+                          blackMove && blackPly === currentPly
                             ? "latest-move"
                             : "",
                         ]
                           .filter(Boolean)
-                          .join(" ")}>
+                          .join(" ")}
+                        onClick={() => showPly(blackPly)}
+                        disabled={!blackMove}
+                        aria-label={`View move ${index + 1}, Black: ${blackMove?.san ?? "not played"}`}>
                         {blackMove?.san ?? ""}
-                      </span>
+                      </button>
                     </div>
                   );
                 },
@@ -394,14 +416,39 @@ export default function App() {
 
           {notice && <p className="game-notice">{notice}</p>}
 
+          <div className="game-actions history-navigation">
+            <button
+              type="button"
+              className="secondary-button"
+              disabled={currentPly === 0}
+              onClick={() => showPly(currentPly - 1)}>
+              ← Previous
+            </button>
+            <button
+              type="button"
+              className="secondary-button"
+              disabled={currentPly >= liveHistory.length}
+              onClick={() => showPly(currentPly + 1)}>
+              Next →
+            </button>
+            <button
+              type="button"
+              className="primary-button"
+              disabled={!isViewingHistory}
+              onClick={() => showPly(liveHistory.length)}>
+              Latest
+            </button>
+          </div>
+
           <div className="game-actions">
             <button
+              type="button"
               className="secondary-button"
               onClick={undo}
               disabled={history.length === 0}>
               ↶ Undo
             </button>
-            <button className="primary-button" onClick={restart}>
+            <button type="button" className="primary-button" onClick={restart}>
               ↻ New game
             </button>
           </div>
