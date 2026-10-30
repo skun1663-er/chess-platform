@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Chess, type Square } from "chess.js";
 import "./App.css";
 
@@ -12,6 +12,13 @@ const symbols: Record<"w" | "b", Record<string, string>> = {
 // function squareName(square: Square) {
 //   return square;
 // }
+function formatClock(milliseconds: number) {
+  const totalSeconds = Math.ceil(milliseconds / 1000);
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+
+  return `${minutes}:${String(seconds).padStart(2, "0")}`;
+}
 
 export default function App() {
   // The live Chess instance owns the actual game and its full move history.
@@ -26,6 +33,24 @@ export default function App() {
     color: "w" | "b";
   } | null>(null);
   const [notice, setNotice] = useState("");
+  // const INITIAL_TIME = 5 * 60 * 1000;
+  const INITIAL_TIME = 10 * 1000;
+
+  const [clocks, setClocks] = useState({
+    w: INITIAL_TIME,
+    b: INITIAL_TIME,
+  });
+
+  const [activeClock, setActiveClock] = useState<"w" | "b" | null>("w");
+  const [timedOut, setTimedOut] = useState<"w" | "b" | null>(null);
+
+  const clockSnapshots = useRef<
+    Array<{
+      clocks: { w: number; b: number };
+      activeClock: "w" | "b" | null;
+      timedOut: "w" | "b" | null;
+    }>
+  >([]);
 
   const chess = game.current;
   const liveHistory = chess.history({ verbose: true });
@@ -80,11 +105,35 @@ export default function App() {
   );
   const materialDifference = whiteMaterial - blackMaterial;
 
-  const gameOver = chess.isGameOver();
+  const gameOver = chess.isGameOver() || timedOut !== null;
   const legalMoves = selected
     ? chess.moves({ square: selected, verbose: true })
     : [];
   const targets = legalMoves.map((move) => move.to);
+
+  useEffect(() => {
+    if (activeClock === null || timedOut !== null) return;
+
+    const startedAt = Date.now();
+    const startingTime = clocks[activeClock];
+
+    const interval = window.setInterval(() => {
+      const elapsed = Date.now() - startedAt;
+      const remaining = Math.max(0, startingTime - elapsed);
+
+      setClocks((previous) => ({
+        ...previous,
+        [activeClock]: remaining,
+      }));
+
+      if (remaining === 0) {
+        setTimedOut(activeClock);
+        setActiveClock(null);
+      }
+    }, 100);
+
+    return () => window.clearInterval(interval);
+  }, [activeClock, timedOut]);
 
   function refresh() {
     setRevision((revision) => revision + 1);
@@ -103,8 +152,14 @@ export default function App() {
     to: Square,
     promotionPiece?: "q" | "r" | "b" | "n",
   ) {
-    // A historical position is read-only; return to Latest before playing.
-    if (viewPly !== null) return;
+    if (viewPly !== null || timedOut !== null) return;
+
+    // Save the clock state before making the move.
+    const clockSnapshot = {
+      clocks: { ...clocks },
+      activeClock,
+      timedOut,
+    };
 
     try {
       chess.move({
@@ -113,7 +168,12 @@ export default function App() {
         ...(promotionPiece ? { promotion: promotionPiece } : {}),
       });
 
-      // setLastMove([move.from, move.to]);
+      // Save the snapshot only after a successful move.
+      clockSnapshots.current.push(clockSnapshot);
+
+      // Switch to the opponent's clock.
+      setActiveClock(chess.turn());
+
       setSelected(null);
       setPromotion(null);
       setNotice("");
@@ -124,7 +184,7 @@ export default function App() {
   }
 
   function handleSquareClick(square: Square) {
-    if (gameOver || promotion || viewPly !== null) return;
+    if (gameOver || timedOut || promotion || viewPly !== null) return;
 
     const piece = chess.get(square);
 
@@ -153,6 +213,13 @@ export default function App() {
 
   function undo() {
     if (!chess.undo()) return;
+    const previousClock = clockSnapshots.current.pop();
+
+    if (previousClock) {
+      setClocks(previousClock.clocks);
+      setActiveClock(previousClock.activeClock);
+      setTimedOut(previousClock.timedOut);
+    }
 
     // const previousMoves = chess.history({ verbose: true });
     // const previous = previousMoves[previousMoves.length - 1];
@@ -166,6 +233,14 @@ export default function App() {
 
   function restart() {
     chess.reset();
+    clockSnapshots.current = [];
+    setClocks({
+      w: INITIAL_TIME,
+      b: INITIAL_TIME,
+    });
+    setActiveClock("w");
+    setTimedOut(null);
+
     setSelected(null);
     // setLastMove(null);
     setPromotion(null);
@@ -175,6 +250,13 @@ export default function App() {
   }
 
   function getStatus() {
+    if (timedOut && !isViewingHistory) {
+      const winner = timedOut === "w" ? "Black" : "White";
+      const loser = timedOut === "w" ? "White" : "Black";
+
+      return `${loser} lost on time — ${winner} wins!`;
+    }
+
     if (displayChess.isCheckmate()) {
       return `Checkmate — ${displayChess.turn() === "w" ? "Black" : "White"} wins.`;
     }
@@ -212,6 +294,10 @@ export default function App() {
               </span>
             </div>
             <span className="player-rating">1200</span>
+            <div
+              className={`chess-clock ${activeClock === "b" ? "clock-active" : ""}`}>
+              {formatClock(clocks.b)}
+            </div>
             <div
               className="captured-pieces"
               aria-label="Pieces captured by Black">
@@ -301,6 +387,10 @@ export default function App() {
             </div>
             <span className="player-rating">1200</span>
             <div
+              className={`chess-clock ${activeClock === "w" ? "clock-active" : ""}`}>
+              {formatClock(clocks.w)}
+            </div>
+            <div
               className="captured-pieces"
               aria-label="Pieces captured by White">
               {whiteCaptured.map((move, index) => (
@@ -332,7 +422,7 @@ export default function App() {
             <span className="turn-icon">♟</span>
             <div>
               <span className="eyebrow">
-                {isViewingHistory ? "HISTORICAL POSITION" : "GAME STATUS"}
+                {isViewingHistory ? "HISTORICAL POSITION: " : "GAME STATUS: "}
               </span>
               <strong>{getStatus()}</strong>
             </div>
