@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { ChangeEvent, useEffect, useMemo, useRef, useState } from "react";
 import { Chess, type Square } from "chess.js";
 import "./App.css";
 
@@ -8,6 +8,15 @@ const symbols: Record<"w" | "b", Record<string, string>> = {
   w: { k: "♔", q: "♕", r: "♖", b: "♗", n: "♘", p: "♙" },
   b: { k: "♚", q: "♛", r: "♜", b: "♝", n: "♞", p: "♟" },
 };
+
+const TIME_CONTROLS = [
+  { label: "1 min", category: "Bullet", time: 60 * 1000 },
+  { label: "3 min", category: "Blitz", time: 3 * 60 * 1000 },
+  { label: "5 min", category: "Blitz", time: 5 * 60 * 1000 },
+  { label: "10 min", category: "Rapid", time: 10 * 60 * 1000 },
+] as const;
+
+const DEFAULT_TIME = 5 * 60 * 1000;
 
 // function squareName(square: Square) {
 //   return square;
@@ -33,16 +42,23 @@ export default function App() {
     color: "w" | "b";
   } | null>(null);
   const [notice, setNotice] = useState("");
-  // const INITIAL_TIME = 5 * 60 * 1000;
-  const INITIAL_TIME = 10 * 1000;
+  const pgnInput = useRef<HTMLInputElement>(null);
+  const [importStatus, setImportStatus] = useState<"success" | "error" | null>(
+    null,
+  );
+
+  const [selectedTime, setSelectedTime] = useState(DEFAULT_TIME);
+  const [whiteName, setWhiteName] = useState("White Player");
+  const [blackName, setBlackName] = useState("Black Player");
 
   const [clocks, setClocks] = useState({
-    w: INITIAL_TIME,
-    b: INITIAL_TIME,
+    w: DEFAULT_TIME,
+    b: DEFAULT_TIME,
   });
 
-  const [activeClock, setActiveClock] = useState<"w" | "b" | null>("w");
+  const [activeClock, setActiveClock] = useState<"w" | "b" | null>(null);
   const [timedOut, setTimedOut] = useState<"w" | "b" | null>(null);
+  const [gameStarted, setGameStarted] = useState(false);
 
   const clockSnapshots = useRef<
     Array<{
@@ -112,7 +128,7 @@ export default function App() {
   const targets = legalMoves.map((move) => move.to);
 
   useEffect(() => {
-    if (activeClock === null || timedOut !== null) return;
+    if (!gameStarted || activeClock === null || timedOut !== null) return;
 
     const startedAt = Date.now();
     const startingTime = clocks[activeClock];
@@ -129,11 +145,14 @@ export default function App() {
       if (remaining === 0) {
         setTimedOut(activeClock);
         setActiveClock(null);
+        setGameStarted(false);
       }
     }, 100);
 
     return () => window.clearInterval(interval);
-  }, [activeClock, timedOut]);
+  }, [gameStarted, activeClock, timedOut]);
+
+  const [boardFlipped, setBoardFlipped] = useState(false);
 
   function refresh() {
     setRevision((revision) => revision + 1);
@@ -152,7 +171,7 @@ export default function App() {
     to: Square,
     promotionPiece?: "q" | "r" | "b" | "n",
   ) {
-    if (viewPly !== null || timedOut !== null) return;
+    if (!gameStarted || viewPly !== null || timedOut !== null) return;
 
     // Save the clock state before making the move.
     const clockSnapshot = {
@@ -172,7 +191,12 @@ export default function App() {
       clockSnapshots.current.push(clockSnapshot);
 
       // Switch to the opponent's clock.
-      setActiveClock(chess.turn());
+      if (chess.isGameOver()) {
+        setActiveClock(null);
+        setGameStarted(false);
+      } else {
+        setActiveClock(chess.turn());
+      }
 
       setSelected(null);
       setPromotion(null);
@@ -184,7 +208,8 @@ export default function App() {
   }
 
   function handleSquareClick(square: Square) {
-    if (gameOver || timedOut || promotion || viewPly !== null) return;
+    if (!gameStarted || gameOver || timedOut || promotion || viewPly !== null)
+      return;
 
     const piece = chess.get(square);
 
@@ -231,22 +256,240 @@ export default function App() {
     refresh();
   }
 
+  function startGame() {
+    if (timedOut !== null || chess.isGameOver()) return;
+
+    setGameStarted(true);
+    setActiveClock(chess.turn());
+    setNotice("");
+  }
+
   function restart() {
     chess.reset();
     clockSnapshots.current = [];
+
     setClocks({
-      w: INITIAL_TIME,
-      b: INITIAL_TIME,
+      w: selectedTime,
+      b: selectedTime,
     });
-    setActiveClock("w");
+
+    setActiveClock(null);
     setTimedOut(null);
+    setGameStarted(false);
 
     setSelected(null);
-    // setLastMove(null);
     setPromotion(null);
     setNotice("");
     setViewPly(null);
+
     refresh();
+  }
+
+  function exportPGN() {
+    if (chess.history().length === 0) {
+      setNotice("There are no moves to export yet.");
+      return;
+    }
+
+    const pgn = chess.pgn();
+
+    const blob = new Blob([pgn], {
+      type: "application/x-chess-pgn",
+    });
+
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+
+    link.href = url;
+    link.download = "chess-game.pgn";
+    link.click();
+
+    URL.revokeObjectURL(url);
+  }
+
+  async function copyPGN() {
+    if (chess.history().length === 0) {
+      setNotice("There are no moves to copy yet.");
+      return;
+    }
+
+    const pgn = chess.pgn();
+
+    try {
+      // First attempt: use the modern Clipboard API.
+      if (navigator.clipboard && window.isSecureContext) {
+        await navigator.clipboard.writeText(pgn);
+        setImportStatus(null);
+        setNotice("Game PGN copied successfully!");
+        return;
+      }
+
+      // Fallback: use a temporary textarea.
+      const textarea = document.createElement("textarea");
+      textarea.value = pgn;
+      textarea.style.position = "fixed";
+      textarea.style.left = "-9999px";
+      textarea.style.top = "0";
+
+      document.body.appendChild(textarea);
+      textarea.focus();
+      textarea.select();
+
+      const copied = document.execCommand("copy");
+      document.body.removeChild(textarea);
+
+      if (!copied) {
+        throw new Error("Clipboard access was denied.");
+      }
+
+      setImportStatus(null);
+      setNotice("Game PGN copied successfully!");
+    } catch (error) {
+      console.error("PGN copy failed:", error);
+
+      setImportStatus("error");
+      setNotice(
+        "Unable to copy PGN. Please use the Download PGN button instead.",
+      );
+    }
+  }
+
+  async function importPGN(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0];
+
+    if (!file) return;
+
+    setImportStatus(null);
+    setNotice("");
+
+    try {
+      const pgnText = await file.text();
+
+      // 1. Reject empty files.
+      if (!pgnText.trim()) {
+        throw new Error("The selected file is empty.");
+      }
+
+      // 2. Parse PGN in a separate Chess instance.
+      // The current game remains untouched until validation succeeds.
+      const importedGame = new Chess();
+
+      try {
+        importedGame.loadPgn(pgnText);
+      } catch (error) {
+        const parserMessage =
+          error instanceof Error ? error.message : "Unknown PGN parsing error.";
+
+        // Extract the invalid SAN move if chess.js identifies it.
+        const invalidMoveMatch = parserMessage.match(
+          /Invalid move in PGN:\s*["']?([^\s"']+)/i,
+        );
+
+        if (invalidMoveMatch) {
+          const invalidSan = invalidMoveMatch[1].replace(/[,;]+$/, "");
+
+          // Find the move number associated with the invalid SAN token.
+          const cleanPgn = pgnText
+            .replace(/^\s*\[[^\r\n]*\]\s*$/gm, "")
+            .replace(/\{[^}]*\}/g, " ")
+            .replace(/;[^\r\n]*/g, " ")
+            .replace(/\([^)]*\)/g, " ")
+            .replace(/\$\d+/g, " ");
+
+          const tokens = cleanPgn.split(/\s+/).filter(Boolean);
+
+          let moveNumber: number | null = null;
+
+          for (const token of tokens) {
+            const combinedMove = token.match(/^(\d+)\.(\.\.)?(.+)$/);
+
+            if (combinedMove) {
+              moveNumber = Number(combinedMove[1]);
+
+              const sanPart = combinedMove[3];
+
+              if (
+                sanPart &&
+                sanPart.replace(/[!?+#]+$/, "") ===
+                  invalidSan.replace(/[!?+#]+$/, "")
+              ) {
+                break;
+              }
+
+              continue;
+            }
+
+            const moveNumberMatch = token.match(/^(\d+)\.(\.\.)?$/);
+
+            if (moveNumberMatch) {
+              moveNumber = Number(moveNumberMatch[1]);
+              continue;
+            }
+
+            if (
+              token.replace(/[!?+#]+$/, "") ===
+              invalidSan.replace(/[!?+#]+$/, "")
+            ) {
+              break;
+            }
+          }
+
+          throw new Error(
+            `Illegal or invalid move "${invalidSan}"${
+              moveNumber !== null ? ` at move ${moveNumber}` : ""
+            }. ${parserMessage}`,
+          );
+        }
+
+        throw new Error(`PGN parsing failed: ${parserMessage}`);
+      }
+
+      // 3. Reject files without actual chess moves.
+      if (importedGame.history().length === 0) {
+        throw new Error(
+          "No valid chess moves found. Please upload a PGN containing at least one move.",
+        );
+      }
+
+      // 4. Replace the current game only after successful validation.
+      game.current = importedGame;
+      clockSnapshots.current = [];
+
+      // Reset clocks and pause the imported game.
+      setClocks({
+        w: selectedTime,
+        b: selectedTime,
+      });
+
+      setActiveClock(null);
+      setTimedOut(null);
+      setGameStarted(false);
+
+      // Reset board interaction and history navigation.
+      setSelected(null);
+      setPromotion(null);
+      setViewPly(null);
+
+      refresh();
+
+      setImportStatus("success");
+      setNotice(
+        `PGN imported successfully! ${importedGame.history().length} half-moves loaded.`,
+      );
+    } catch (error) {
+      console.error("PGN import failed:", error);
+
+      const errorMessage =
+        error instanceof Error
+          ? error.message
+          : "An unexpected error occurred.";
+
+      setImportStatus("error");
+      setNotice(`Import failed: ${errorMessage}`);
+    } finally {
+      // Allow the same file to be selected again.
+      event.target.value = "";
+    }
   }
 
   function getStatus() {
@@ -272,6 +515,62 @@ export default function App() {
     return `${displayChess.turn() === "w" ? "White" : "Black"} to move`;
   }
 
+  function getGameResult() {
+    if (timedOut) {
+      return {
+        title: `${timedOut === "w" ? "Black" : "White"} wins!`,
+        reason: `${timedOut === "w" ? "White" : "Black"} lost on time`,
+        score: timedOut === "w" ? "0–1" : "1–0",
+      };
+    }
+
+    if (chess.isCheckmate()) {
+      const winner = chess.turn() === "w" ? "Black" : "White";
+
+      return {
+        title: `${winner} wins!`,
+        reason: "Checkmate",
+        score: winner === "White" ? "1–0" : "0–1",
+      };
+    }
+
+    if (chess.isStalemate()) {
+      return {
+        title: "Game drawn",
+        reason: "Stalemate",
+        score: "½–½",
+      };
+    }
+
+    if (chess.isThreefoldRepetition()) {
+      return {
+        title: "Game drawn",
+        reason: "Threefold repetition",
+        score: "½–½",
+      };
+    }
+
+    if (chess.isInsufficientMaterial()) {
+      return {
+        title: "Game drawn",
+        reason: "Insufficient material",
+        score: "½–½",
+      };
+    }
+
+    if (chess.isDraw()) {
+      return {
+        title: "Game drawn",
+        reason: "Draw condition reached",
+        score: "½–½",
+      };
+    }
+
+    return null;
+  }
+
+  const gameResult = getGameResult();
+
   return (
     <main className="chess-app">
       <header className="topbar">
@@ -284,13 +583,14 @@ export default function App() {
       </header>
 
       <section className="game-layout">
-        <div className="board-section">
+        <div className={`board-section ${boardFlipped ? "board-flipped" : ""}`}>
+          {/* black player bar */}
           <div className="player-bar">
             <div className="player-avatar">♟</div>
             <div>
-              <strong>Black Player</strong>
+              <strong>{blackName || "Black Player"}</strong>
               <span>
-                {turn === "b" ? "Black to move" : "Waiting for Black"}
+                {turn === "b" ? "[Black to move]" : "[Waiting for Black]"}
               </span>
             </div>
             <span className="player-rating">1200</span>
@@ -316,11 +616,17 @@ export default function App() {
             </div>
           </div>
 
+          {/* chessboard */}
           <div className="chessboard">
-            {board.map((row, rowIndex) =>
+            {(boardFlipped
+              ? [...board].reverse().map((row) => [...row].reverse())
+              : board
+            ).map((row, rowIndex) =>
               row.map((piece, colIndex) => {
-                const square = `${files[colIndex]}${8 - rowIndex}` as Square;
-                const isLight = (rowIndex + colIndex) % 2 === 0;
+                const actualRow = boardFlipped ? 7 - rowIndex : rowIndex;
+                const actualCol = boardFlipped ? 7 - colIndex : colIndex;
+                const square = `${files[actualCol]}${8 - actualRow}` as Square;
+                const isLight = (actualRow + actualCol) % 2 === 0;
                 const isSelected = !isViewingHistory && selected === square;
                 const isTarget = !isViewingHistory && targets.includes(square);
                 const isLastMove = displayedLastMove
@@ -376,13 +682,14 @@ export default function App() {
               }),
             )}
           </div>
-
+          {/* White player bar */}
           <div className="player-bar bottom-player">
             <div className="player-avatar">♙</div>
             <div>
-              <strong>White Player (You)</strong>
+              <strong>{whiteName || "White Player (You) "}</strong>
+
               <span>
-                {turn === "w" ? "White to move" : "Waiting for White"}
+                {turn === "w" ? "[White to move]" : "[Waiting for White]"}
               </span>
             </div>
             <span className="player-rating">1200</span>
@@ -390,6 +697,7 @@ export default function App() {
               className={`chess-clock ${activeClock === "w" ? "clock-active" : ""}`}>
               {formatClock(clocks.w)}
             </div>
+
             <div
               className="captured-pieces"
               aria-label="Pieces captured by White">
@@ -410,6 +718,7 @@ export default function App() {
         </div>
 
         <aside className="game-panel">
+          {/* game heading */}
           <div className="panel-heading">
             <div>
               <span className="eyebrow">GAME ROOM</span>
@@ -417,7 +726,57 @@ export default function App() {
             </div>
             <span className="game-badge">1 vs 1</span>
           </div>
+          {/* Time settings */}
+          <div className="time-settings">
+            <div className="time-settings-heading">
+              <strong>Time control</strong>
+              <span>Applies to next game</span>
+            </div>
 
+            <div className="time-control-options">
+              {TIME_CONTROLS.map((control) => (
+                <button
+                  key={control.time}
+                  type="button"
+                  className={`time-control-button ${
+                    selectedTime === control.time ? "active-time-control" : ""
+                  }`}
+                  onClick={() => setSelectedTime(control.time)}>
+                  <strong>{control.label}</strong>
+                  <span>{control.category}</span>
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Player Name inputs */}
+          <div className="player-settings">
+            <h2>Player names</h2>
+
+            <label>
+              White Player
+              <input
+                type="text"
+                value={whiteName}
+                onChange={(e) => setWhiteName(e.target.value)}
+                placeholder="Enter White's name"
+                maxLength={20}
+              />
+            </label>
+
+            <label>
+              Black Player
+              <input
+                type="text"
+                value={blackName}
+                onChange={(e) => setBlackName(e.target.value)}
+                placeholder="Enter Black's name"
+                maxLength={20}
+              />
+            </label>
+          </div>
+
+          {/* Game status */}
           <div className="turn-card">
             <span className="turn-icon">♟</span>
             <div>
@@ -428,6 +787,31 @@ export default function App() {
             </div>
           </div>
 
+          {gameResult && (
+            <div className="game-result-panel">
+              <span className="eyebrow">GAME FINISHED</span>
+
+              <h2>{gameResult.title}</h2>
+
+              <div className="result-score">{gameResult.score}</div>
+
+              <p>{gameResult.reason}</p>
+
+              <div className="result-details">
+                <span>Total moves</span>
+                <strong>{Math.ceil(liveHistory.length / 2)}</strong>
+              </div>
+
+              <button
+                type="button"
+                className="primary-button"
+                onClick={restart}>
+                ↻ Play again
+              </button>
+            </div>
+          )}
+
+          {/* pawn promotion panel */}
           {promotion && viewPly === null && (
             <div className="promotion-panel">
               <strong>Choose your promotion</strong>
@@ -446,6 +830,7 @@ export default function App() {
             </div>
           )}
 
+          {/* Move History */}
           <div className="moves-heading">
             <h2>Move history</h2>
             <span>{history.length} half-moves</span>
@@ -504,7 +889,20 @@ export default function App() {
             )}
           </div>
 
-          {notice && <p className="game-notice">{notice}</p>}
+          {notice && (
+            <p
+              className={`game-notice ${
+                importStatus === "success"
+                  ? "pgn-import-success"
+                  : importStatus === "error"
+                    ? "pgn-import-error"
+                    : ""
+              }`}
+              role="status"
+              aria-live="polite">
+              {notice}
+            </p>
+          )}
 
           <div className="game-actions history-navigation">
             <button
@@ -531,6 +929,69 @@ export default function App() {
           </div>
 
           <div className="game-actions">
+            {!gameStarted && !gameOver && (
+              <button
+                type="button"
+                className="primary-button"
+                onClick={startGame}>
+                ▶ Start Game
+              </button>
+            )}
+
+            <button
+              type="button"
+              className="secondary-button"
+              onClick={undo}
+              disabled={history.length === 0}>
+              ↶ Undo
+            </button>
+
+            <button type="button" className="primary-button" onClick={restart}>
+              ↻ New Game
+            </button>
+
+            <button
+              type="button"
+              className="secondary-button"
+              onClick={() => setBoardFlipped((previous) => !previous)}>
+              ⇅ Flip Board
+            </button>
+          </div>
+
+          <div className="game-actions">
+            <button
+              type="button"
+              className="secondary-button"
+              onClick={() => pgnInput.current?.click()}>
+              ↑ Import PGN
+            </button>
+
+            <input
+              ref={pgnInput}
+              type="file"
+              accept=".pgn,.txt"
+              onChange={importPGN}
+              hidden
+            />
+
+            <button
+              type="button"
+              className="secondary-button"
+              onClick={copyPGN}
+              disabled={history.length === 0}>
+              Copy PGN
+            </button>
+
+            <button
+              type="button"
+              className="primary-button"
+              onClick={exportPGN}
+              disabled={history.length === 0}>
+              ↓ Download PGN
+            </button>
+          </div>
+
+          {/* <div className="game-actions">
             <button
               type="button"
               className="secondary-button"
@@ -541,7 +1002,7 @@ export default function App() {
             <button type="button" className="primary-button" onClick={restart}>
               ↻ New game
             </button>
-          </div>
+          </div> */}
 
           <p className="disclaimer">Rules powered by chess.js · Local game</p>
         </aside>

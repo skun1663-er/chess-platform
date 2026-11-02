@@ -549,3 +549,189 @@ button:focus-visible,
   color: #ffffff;
   box-shadow: 0 0 12px #69d6ad30;
 }
+
+.time-settings {
+  margin: 18px 0;
+}
+
+.time-settings-heading {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 10px;
+  gap: 8px;
+}
+
+.time-settings-heading strong {
+  font-size: 14px;
+}
+
+.time-settings-heading span {
+  font-size: 11px;
+  color: #888;
+}
+
+.time-control-options {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.time-control-button {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 10px 4px;
+  border: 1px solid #444;
+  border-radius: 8px;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+}
+
+.time-control-button strong {
+  font-size: 13px;
+}
+
+.time-control-button span {
+  font-size: 10px;
+  opacity: 0.7;
+}
+
+.time-control-button.active-time-control {
+  border-color: #00d7f1;
+  background: rgba(0, 215, 241, 0.12);
+  color: #00d7f1;
+}
+
+@media (max-width: 480px) {
+  .time-control-options {
+    gap: 5px;
+  }
+
+  .time-control-button {
+    padding: 9px 2px;
+  }
+}
+
+.app-footer {
+  margin-top: 40px;
+  padding-top: 20px;
+  border-top: 1px solid var(--border);
+  text-align: center;
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.game-result-panel {
+  padding: 22px;
+  margin: 18px 0;
+  text-align: center;
+  background: #f0f9ff;
+  border: 1px solid #bae6fd;
+  border-radius: 14px;
+}
+
+.game-result-panel h2 {
+  margin: 10px 0;
+  font-size: 24px;
+  color: #0f172a;
+}
+
+.result-score {
+  margin: 12px auto;
+  font-size: 32px;
+  font-weight: 800;
+  color: #0284c7;
+}
+
+.game-result-panel p {
+  margin: 8px 0 16px;
+  color: #475569;
+}
+
+.result-details {
+  display: flex;
+  justify-content: space-between;
+  padding: 12px 0;
+  margin-bottom: 14px;
+  border-top: 1px solid #bae6fd;
+}
+
+.game-result-panel button {
+  width: 100%;
+}
+
+.player-settings {
+  padding: 16px;
+  margin: 16px 0;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+}
+
+.player-settings h2 {
+  margin: 0 0 14px;
+  font-size: 16px;
+}
+
+.player-settings label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 12px;
+  font-size: 13px;
+  font-weight: 600;
+  color: #475569;
+}
+
+.player-settings input {
+  width: 100%;
+  padding: 10px 12px;
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  font: inherit;
+  font-weight: 400;
+  outline: none;
+}
+
+.player-settings input:focus {
+  border-color: #0284c7;
+}
+
+/* Keep the player bars and chessboard in a vertical layout */
+.board-section {
+  display: flex;
+  flex-direction: column;
+}
+
+/* Move the complete player bars when the board is flipped */
+.board-section.board-flipped > .player-bar:first-child {
+  order: 3;
+}
+
+.board-section.board-flipped > .chessboard {
+  order: 2;
+}
+
+.board-section.board-flipped > .bottom-player {
+  order: 1;
+}
+
+/* PGN import feedback */
+.game-notice.pgn-import-success {
+  border: 2px solid #eab308;
+  background: #fefce8;
+  color: #854d0e;
+  padding: 12px 14px;
+  border-radius: 8px;
+}
+
+.game-notice.pgn-import-error {
+  border: 2px solid #dc2626;
+  background: #fef2f2;
+  color: #991b1b;
+  padding: 12px 14px;
+  border-radius: 8px;
+}
